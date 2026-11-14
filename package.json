@@ -24,7 +24,8 @@
     "simulate:performance": "tsx scripts/simulate-performance.ts",
     "simulate:import-export": "tsx scripts/simulate-import-export.ts",
     "generate:templates": "tsx scripts/generate-templates.ts",
-    "generate:qa-workbook": "tsx scripts/generate-qa-workbook.ts"
+    "generate:qa-workbook": "tsx scripts/generate-qa-workbook.ts",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@prisma/client": "5.17.0",
