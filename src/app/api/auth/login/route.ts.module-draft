@@ -1,0 +1,41 @@
+import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { prisma } from "@/lib/prisma";
+import { verifyPassword, signToken } from "@/lib/auth";
+
+const schema = z.object({
+  email: z.string().email(),
+  password: z.string().min(1),
+});
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = schema.parse(await req.json());
+
+    const user = await prisma.user.findUnique({ where: { email: body.email } });
+    if (!user) {
+      return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
+    }
+    if (user.isBlocked) {
+      return NextResponse.json({ error: "This account has been blocked. Contact support." }, { status: 403 });
+    }
+
+    const valid = await verifyPassword(body.password, user.passwordHash);
+    if (!valid) {
+      return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
+    }
+
+    const token = signToken({ userId: user.id, role: user.role });
+
+    return NextResponse.json({
+      user: { id: user.id, name: user.name, email: user.email, role: user.role },
+      token,
+    });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return NextResponse.json({ error: "Invalid input" }, { status: 400 });
+    }
+    console.error(err);
+    return NextResponse.json({ error: "Login failed" }, { status: 500 });
+  }
+}

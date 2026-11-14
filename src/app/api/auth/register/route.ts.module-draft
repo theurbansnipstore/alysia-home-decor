@@ -1,0 +1,40 @@
+import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { prisma } from "@/lib/prisma";
+import { hashPassword, signToken } from "@/lib/auth";
+
+const schema = z.object({
+  name: z.string().min(2),
+  email: z.string().email(),
+  password: z.string().min(8),
+  phone: z.string().optional(),
+});
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = schema.parse(await req.json());
+
+    const existing = await prisma.user.findUnique({ where: { email: body.email } });
+    if (existing) {
+      return NextResponse.json({ error: "An account with this email already exists" }, { status: 409 });
+    }
+
+    const passwordHash = await hashPassword(body.password);
+    const user = await prisma.user.create({
+      data: { name: body.name, email: body.email, phone: body.phone, passwordHash },
+    });
+
+    const token = signToken({ userId: user.id, role: user.role });
+
+    return NextResponse.json(
+      { user: { id: user.id, name: user.name, email: user.email, role: user.role }, token },
+      { status: 201 }
+    );
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return NextResponse.json({ error: "Invalid input", details: err.errors }, { status: 400 });
+    }
+    console.error(err);
+    return NextResponse.json({ error: "Registration failed" }, { status: 500 });
+  }
+}

@@ -1,0 +1,568 @@
+// Kutir Home Decor — core data model.
+// Swap provider to "postgresql" if you prefer Postgres; the rest is unchanged.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Enums ----------
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  MANAGER
+  INVENTORY_STAFF
+  ORDER_MANAGER
+  SUPPORT_STAFF
+  MARKETING_STAFF
+  CUSTOMER
+}
+
+enum ProductStatus {
+  ACTIVE
+  DRAFT
+  ARCHIVED
+}
+
+enum PageStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum ImagePurpose {
+  PRODUCT
+  LIFESTYLE
+  DETAIL
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PACKED
+  READY_TO_SHIP
+  SHIPPED
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+  RETURNED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  RAZORPAY
+  COD
+  STRIPE
+  PAYPAL
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+// Razorpay's own real refund.status values (Module 28) — confirmed against
+// https://razorpay.com/docs/api/refunds/create-normal/, not invented.
+enum RefundStatus {
+  PENDING
+  PROCESSED
+  FAILED
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FLAT
+  FREE_SHIPPING
+  BUY_X_GET_Y
+}
+
+// Only meaningful alongside Order.status CANCELLED/RETURNED. CUSTOMER_REFUSED_COD
+// is deliberately narrow — status-service.ts only allows selecting it for a
+// COD order transitioning OUT_FOR_DELIVERY -> RETURNED, since that's the only
+// transition that actually represents an unaccepted delivery. It is the one
+// value that counts toward COD-risk (Module 21); the others explicitly do not.
+// RETURNED-only reasons (unchanged, Module 21): CUSTOMER_REFUSED_COD,
+// CUSTOMER_REQUESTED_RETURN, DELIVERY_FAILURE, DAMAGED.
+// CANCELLED-only reasons (Module 25 Part 2): CUSTOMER_REQUESTED_CANCELLATION,
+// PAYMENT_ISSUE, ADDRESS_ISSUE, SELLER_UNABLE_TO_FULFILL, PRODUCT_UNAVAILABLE.
+// OTHER is shared by both. status-service.ts enforces which subset applies
+// to which status — this enum intentionally does not encode that itself.
+enum OrderReturnReason {
+  CUSTOMER_REFUSED_COD
+  CUSTOMER_REQUESTED_RETURN
+  DELIVERY_FAILURE
+  DAMAGED
+  OTHER
+  CUSTOMER_REQUESTED_CANCELLATION
+  PAYMENT_ISSUE
+  ADDRESS_ISSUE
+  SELLER_UNABLE_TO_FULFILL
+  PRODUCT_UNAVAILABLE
+}
+
+// ---------- Core models ----------
+
+model User {
+  id            String    @id @default(cuid())
+  name          String
+  email         String    @unique
+  phone         String?
+  passwordHash  String
+  role          Role      @default(CUSTOMER)
+  emailVerified DateTime?
+  isBlocked     Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // COD-risk restriction (Module 21). codBlocked is the sole enforcement
+  // flag checked server-side at checkout — never derived on the fly there,
+  // since the JWT session is stateless and can't reflect a change made
+  // after login. codBlockedBy is "SYSTEM" for an automatic restriction or
+  // an admin's id/email for a manual override — informational only, not a
+  // foreign key (keeps this additive and simple).
+  codBlocked       Boolean   @default(false)
+  codBlockedReason String?
+  codBlockedAt     DateTime?
+  codBlockedBy     String?
+
+  addresses           Address[]
+  orders              Order[]
+  wishlist            WishlistItem[]
+  reviews             Review[]
+  cart                CartItem[]
+  activityLogs        ActivityLog[]
+  notifications       Notification[]
+  passwordResetTokens PasswordResetToken[]
+
+  @@index([role])
+}
+
+model Address {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label      String? // Home / Work
+  fullName   String
+  phone      String
+  line1      String
+  line2      String?
+  city       String
+  state      String
+  pincode    String
+  country    String   @default("India")
+  isDefault  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Category {
+  id          String     @id @default(cuid())
+  name        String
+  slug        String     @unique
+  description String?
+  image       String?
+  parentId    String?
+  parent      Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children    Category[] @relation("CategoryTree")
+  sortOrder   Int        @default(0)
+  isVisible   Boolean    @default(true)
+  seoTitle    String?
+  seoDesc     String?
+  products    Product[]
+  createdAt   DateTime   @default(now())
+
+  @@index([parentId])
+}
+
+model Theme {
+  id          String    @id @default(cuid())
+  name        String
+  slug        String    @unique
+  description String?
+  banner      String?
+  isEnabled   Boolean   @default(true)
+  sortOrder   Int       @default(0)
+  products    Product[]
+  createdAt   DateTime  @default(now())
+}
+
+model Product {
+  id             String        @id @default(cuid())
+  name           String
+  slug           String        @unique
+  description    String        @db.Text
+  specifications Json?
+  price          Decimal       @db.Decimal(10, 2)
+  discountPrice  Decimal?      @db.Decimal(10, 2)
+  sku            String        @unique
+  barcode        String?
+  brand          String?
+  weightGrams    Int?
+  dimensions     String?
+  tags           String?
+  status         ProductStatus @default(ACTIVE)
+  isFeatured     Boolean       @default(false)
+  isBestSeller   Boolean       @default(false)
+  isTrending     Boolean       @default(false)
+  isNewArrival   Boolean       @default(false)
+  seoTitle       String?
+  seoDesc        String?
+
+  returnPolicyOverride String? @db.Text
+
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id])
+  themeId    String?
+  theme      Theme?   @relation(fields: [themeId], references: [id])
+
+  images     ProductImage[]
+  variants   ProductVariant[]
+  attributes ProductAttribute[]
+  reviews    Review[]
+
+  stockAvailable Int @default(0)
+  stockReserved  Int @default(0)
+  stockDamaged   Int @default(0)
+  lowStockAt     Int @default(5)
+
+  orderItems    OrderItem[]
+  wishlistedBy  WishlistItem[]
+  cartOf        CartItem[]
+  stockHistory  StockMovement[]
+  slugRedirects ProductSlugRedirect[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([categoryId])
+  @@index([themeId])
+  @@index([status])
+}
+
+model ProductImage {
+  id         String       @id @default(cuid())
+  productId  String
+  product    Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  url        String
+  storageKey String?
+  altText    String?
+  sortOrder  Int          @default(0)
+  purpose    ImagePurpose @default(PRODUCT)
+  createdAt  DateTime     @default(now())
+
+  @@index([productId])
+}
+
+model ProductVariant {
+  id        String  @id @default(cuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  name      String
+  sku       String  @unique
+  price     Decimal @db.Decimal(10, 2)
+  stock     Int     @default(0)
+
+  @@index([productId])
+}
+
+model ProductAttribute {
+  id        String  @id @default(cuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  label     String
+  value     String
+  sortOrder Int     @default(0)
+  isVisible Boolean @default(true)
+
+  @@index([productId])
+}
+
+model StockMovement {
+  id             String   @id @default(cuid())
+  productId      String
+  product        Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  change         Int
+  reason         String
+  note           String?
+  adjustedByName String?
+  createdAt      DateTime @default(now())
+
+  @@index([productId])
+}
+
+// Module 32 — one row per slug a product has ever moved away from.
+// Resolution always re-reads the product's CURRENT slug at request time
+// (never a stored "newSlug"), so multi-step slug history collapses
+// automatically (a and b both resolve straight to whatever slug the
+// product has today) and redirect loops are structurally impossible —
+// there is no field here that could point at another redirect.
+model ProductSlugRedirect {
+  id        String   @id @default(cuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  oldSlug   String   @unique
+  createdAt DateTime @default(now())
+
+  @@index([productId])
+}
+
+model CartItem {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  quantity  Int      @default(1)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, productId])
+}
+
+model WishlistItem {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, productId])
+}
+
+model Review {
+  id         String   @id @default(cuid())
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rating     Int
+  title      String?
+  comment    String?  @db.Text
+  images     String?
+  isApproved Boolean  @default(false)
+  isVerified Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([productId])
+}
+
+model Coupon {
+  id            String       @id @default(cuid())
+  code          String       @unique
+  type          DiscountType
+  value         Decimal      @db.Decimal(10, 2)
+  minPurchase   Decimal?     @db.Decimal(10, 2)
+  usageLimit    Int?
+  usedCount     Int          @default(0)
+  isActive      Boolean      @default(true)
+  startsAt      DateTime?
+  expiresAt     DateTime?
+  createdAt     DateTime     @default(now())
+
+  orders Order[]
+}
+
+model Order {
+  id              String        @id @default(cuid())
+  orderNumber     String        @unique
+  userId          String?
+  user            User?         @relation(fields: [userId], references: [id])
+  status          OrderStatus   @default(PENDING)
+  items           OrderItem[]
+
+  // Immutable snapshot at time of order — never a live FK to Address.
+  // Editing a saved Address must never alter historical order data.
+  customerName         String
+  customerEmail        String
+  customerPhone        String
+  shippingAddress      Json
+  billingAddress       Json
+  deliveryInstructions String?
+  giftMessage          String?
+  gstNumber            String? // reserved for future B2B invoicing
+  companyName          String? // reserved for future B2B invoicing
+
+  subtotal       Decimal  @db.Decimal(10, 2)
+  shippingCharge Decimal  @db.Decimal(10, 2) @default(0)
+  taxAmount      Decimal  @db.Decimal(10, 2) @default(0)
+  discountAmount Decimal  @db.Decimal(10, 2) @default(0)
+  total          Decimal  @db.Decimal(10, 2)
+
+  couponId String?
+  coupon   Coupon? @relation(fields: [couponId], references: [id])
+
+  paymentMethod PaymentMethod
+  payment       Payment?
+
+  trackingNumber String?
+  courierName    String?
+
+  // Set only when an admin transitions this order to CANCELLED or RETURNED
+  // (Module 21) — null for every other status and for all orders that
+  // predate this field, meaning "reason not recorded", never a guessed
+  // value. This is what lets COD-risk logic distinguish a genuine
+  // post-delivery return (CUSTOMER_REQUESTED_RETURN) from a refused/
+  // unaccepted COD delivery (CUSTOMER_REFUSED_COD) — before this field
+  // existed, both looked identical (Order.status="RETURNED").
+  statusReason OrderReturnReason?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status])
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  name      String
+  price     Decimal @db.Decimal(10, 2)
+  quantity  Int
+
+  @@index([orderId])
+}
+
+model Payment {
+  id                String        @id @default(cuid())
+  orderId           String        @unique
+  order             Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  method            PaymentMethod
+  status            PaymentStatus @default(PENDING)
+  razorpayOrderId   String?
+  razorpayPaymentId String?
+  razorpaySignature String?
+  amount            Decimal       @db.Decimal(10, 2)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  // Refund tracking (Module 28) — additive only, all nullable. Payment.status
+  // still flips to REFUNDED exactly as before (unchanged behavior for
+  // existing consumers); these fields add the actual refund record
+  // (Razorpay's real refund entity) that a bare status flag can't represent.
+  // refundStatus values are Razorpay's own real refund.status values
+  // (pending/processed/failed), confirmed against their official API docs.
+  razorpayRefundId  String?
+  refundedAmount    Decimal?      @db.Decimal(10, 2)
+  refundStatus      RefundStatus?
+  refundInitiatedAt DateTime?
+  refundedAt        DateTime?
+}
+
+model Banner {
+  id        String   @id @default(cuid())
+  title     String
+  subtitle  String?
+  image     String
+  ctaText   String?
+  ctaLink   String?
+  placement String   @default("hero")
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+model Setting {
+  id    String @id @default(cuid())
+  key   String @unique
+  value Json
+}
+
+// Module 36: generic editorial pages (e.g. a one-off lookbook or press
+// page) that don't fit any of the fixed, purpose-built settings domains
+// above (About/Contact/FAQ/etc., each already its own typed Setting row).
+// Plain-text content only — rendered via React text interpolation, never
+// dangerouslySetInnerHTML, so there is no HTML/script injection surface
+// and no sanitizer dependency is needed. Publicly routed at /[slug];
+// slug uniqueness plus the reserved-path list in
+// src/lib/content/reserved-slugs.ts keep a page from shadowing or
+// colliding with any existing route.
+model Page {
+  id          String     @id @default(cuid())
+  slug        String     @unique
+  title       String
+  content     String     @db.Text
+  excerpt     String?
+  status      PageStatus @default(DRAFT)
+  seoTitle    String?
+  seoDesc     String?
+  publishedAt DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([status])
+}
+
+model ActivityLog {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  action    String
+  entity    String?
+  entityId  String?
+  ipAddress String?
+  // Structured, action-specific detail (Module 22) — e.g. previous/new
+  // status, reason, incident count. Optional and additive: every row before
+  // this field existed has metadata=null, which is a true "not recorded"
+  // state, never a guessed value. Only ever populated via the typed
+  // logActivity() helper (src/lib/admin/activity-log.ts), which hand-picks
+  // safe fields per action — never a raw request body, user, or payment
+  // object, so it can't accidentally carry a password/token/secret.
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  // Module 40 — order-timeline.ts (rendered on every admin order detail
+  // page) and razorpay-refund.ts's duplicate-refund guard both filter by
+  // this exact (entity, entityId) pair; without it, every such lookup was
+  // a full table scan on a table that only ever grows. Additive only, no
+  // existing index removed, no data touched.
+  @@index([entity, entityId])
+}
+
+// Recipient-scoped, in-app notification — distinct from ActivityLog (an
+// actor-scoped admin audit trail with no read state). One row per
+// recipient: a "new order" admin notification fans out to N staff as N
+// rows, not one shared row, so per-recipient read state stays correct.
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  title     String
+  message   String    @db.Text
+  link      String?
+  metadata  Json?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
+}
+
+// The raw token is emailed to the user; only its SHA-256 hash is stored
+// here (fast, deterministic hash — correct for a high-entropy random token,
+// unlike bcrypt's per-hash salt which would make an indexed lookup by
+// token impossible). Single-use via usedAt; expiresAt enforces the 60-
+// minute window. Requesting a new reset deletes this user's prior unused
+// tokens, so only the latest email link is ever valid.
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}

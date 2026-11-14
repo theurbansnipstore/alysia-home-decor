@@ -1,0 +1,69 @@
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
+
+// GET /api/products?category=wall-decor&theme=bengali-collection&sort=price_asc&page=1&search=diya
+export async function GET(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const category = searchParams.get("category");
+    const theme = searchParams.get("theme");
+    const search = searchParams.get("search");
+    const minPrice = searchParams.get("minPrice");
+    const maxPrice = searchParams.get("maxPrice");
+    const sort = searchParams.get("sort") || "newest";
+    const page = parseInt(searchParams.get("page") || "1", 10);
+    const pageSize = Math.min(parseInt(searchParams.get("pageSize") || "12", 10), 60);
+
+    const where: Prisma.ProductWhereInput = {
+      status: "ACTIVE",
+      ...(category ? { category: { slug: category } } : {}),
+      ...(theme ? { theme: { slug: theme } } : {}),
+      ...(search
+        ? {
+            OR: [
+              { name: { contains: search } },
+              { tags: { contains: search } },
+              { description: { contains: search } },
+            ],
+          }
+        : {}),
+      ...(minPrice || maxPrice
+        ? {
+            price: {
+              ...(minPrice ? { gte: parseFloat(minPrice) } : {}),
+              ...(maxPrice ? { lte: parseFloat(maxPrice) } : {}),
+            },
+          }
+        : {}),
+    };
+
+    const orderBy: Prisma.ProductOrderByWithRelationInput =
+      sort === "price_asc"
+        ? { price: "asc" }
+        : sort === "price_desc"
+        ? { price: "desc" }
+        : sort === "best_selling"
+        ? { orderItems: { _count: "desc" } }
+        : { createdAt: "desc" };
+
+    const [items, total] = await Promise.all([
+      prisma.product.findMany({
+        where,
+        orderBy,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: { images: { orderBy: { sortOrder: "asc" }, take: 1 }, category: true, theme: true },
+      }),
+      prisma.product.count({ where }),
+    ]);
+
+    return NextResponse.json({
+      items,
+      pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
+    });
+  } catch (err) {
+    console.error(err);
+    return NextResponse.json({ error: "Failed to fetch products" }, { status: 500 });
+  }
+}
