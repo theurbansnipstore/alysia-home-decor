@@ -1,3 +1,6 @@
+// Query live data and request context only when this endpoint is called.
+export const dynamic = "force-dynamic";
+
 import { getAllThemes } from "@/lib/data/themes";
 import { apiSuccess, apiError } from "@/lib/api-response";
 

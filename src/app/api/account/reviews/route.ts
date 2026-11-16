@@ -1,3 +1,6 @@
+// Query live data and request context only when this endpoint is called.
+export const dynamic = "force-dynamic";
+
 import { getSession } from "@/lib/session";
 import { getAccountReviews } from "@/lib/data/reviews";
 import { apiSuccess, apiError } from "@/lib/api-response";

@@ -10,6 +10,9 @@ import { getSocialSettings } from "@/lib/settings/social";
 import { getSiteSeoDefaults } from "@/lib/settings/branding";
 import JsonLd from "@/components/seo/JsonLd";
 
+// Storefront content and metadata read live database settings at request time.
+export const dynamic = "force-dynamic";
+
 const fraunces = Fraunces({
   subsets: ["latin"],
   variable: "--font-fraunces",
@@ -47,6 +50,9 @@ const siteUrl = getSiteUrl();
  * before — an unconfigured store's <head> is unchanged.
  */
 export async function generateMetadata(): Promise<Metadata> {
+  if (!process.env.DATABASE_URL) {
+    return { title: `${brand.name} — Store preview`, robots: { index: false, follow: false } };
+  }
   const seo = await getSiteSeoDefaults();
 
   return {
@@ -90,6 +96,9 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  if (!process.env.DATABASE_URL) {
+    return <html lang="en"><body>{children}</body></html>;
+  }
   const social = await getSocialSettings();
   const organizationJsonLd = buildOrganizationJsonLd({
     name: brand.name,

@@ -1,3 +1,6 @@
+// Query live data and request context only when this endpoint is called.
+export const dynamic = "force-dynamic";
+
 import { handleSettingsPatch } from "@/lib/admin/settings-route-helper";
 import { browsePagesSettingsSchema } from "@/lib/validations/store-settings";
 import { getBrowsePagesSettings, setBrowsePagesSettings } from "@/lib/settings/browse-pages";

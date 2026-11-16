@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { verifyToken } from "@/lib/auth";
+import { verifyToken } from "@/lib/token";
 import type { Role } from "@prisma/client";
 import { ORDER_AREA_ROLES } from "@/lib/admin/order-roles";
 import { REVIEW_MODERATOR_ROLES } from "@/lib/admin/review-roles";
@@ -62,6 +62,20 @@ const protectedRoutes: ProtectedRoute[] = [
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  // No database is configured: expose only the labelled placeholder and assets.
+  if (!process.env.DATABASE_URL) {
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json(
+        { success: false, error: "The store is in preview mode. Account, cart, and checkout services are temporarily unavailable." },
+        { status: 503, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    const previewUrl = request.nextUrl.clone();
+    previewUrl.pathname = "/database-preview";
+    return NextResponse.rewrite(previewUrl, {
+      headers: { "Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow" },
+    });
+  }
   const rule = protectedRoutes.find((r) => pathname.startsWith(r.prefix));
   if (!rule) return NextResponse.next();
 
@@ -82,5 +96,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/account/:path*", "/admin/:path*"],
+  matcher: ["/((?!_next/|.*\\.[^/]+$).*)", "/api/:path*"],
 };

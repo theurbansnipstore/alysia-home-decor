@@ -1,3 +1,6 @@
+// Query live data and request context only when this endpoint is called.
+export const dynamic = "force-dynamic";
+
 import { NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getCustomerOrders } from "@/lib/data/customer-orders";

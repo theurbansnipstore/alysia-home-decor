@@ -1,3 +1,6 @@
+// Query live data and request context only when this endpoint is called.
+export const dynamic = "force-dynamic";
+
 import { NextRequest } from "next/server";
 import { requireApiRole } from "@/lib/admin/api-auth";
 import { REVIEW_MODERATOR_ROLES } from "@/lib/admin/review-roles";
