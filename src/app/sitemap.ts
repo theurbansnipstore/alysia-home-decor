@@ -1,3 +1,6 @@
+// Generate from live catalog data rather than querying the database during builds.
+export const dynamic = "force-dynamic";
+
 import type { MetadataRoute } from "next";
 import { prisma } from "@/lib/prisma";
 import { getSiteUrl } from "@/lib/seo/site";
@@ -19,6 +22,7 @@ import { getSiteUrl } from "@/lib/seo/site";
  * in the sitemap spec).
  */
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+  if (!process.env.DATABASE_URL) return [];
   const siteUrl = getSiteUrl();
 
   const [products, categories, themes, pages] = await Promise.all([

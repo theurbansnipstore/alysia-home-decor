@@ -1,3 +1,6 @@
+// Query live data and request context only when this endpoint is called.
+export const dynamic = "force-dynamic";
+
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { apiSuccess, apiError } from "@/lib/api-response";

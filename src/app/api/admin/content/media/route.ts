@@ -1,3 +1,6 @@
+// Query live data and request context only when this endpoint is called.
+export const dynamic = "force-dynamic";
+
 import { handleSettingsPatch } from "@/lib/admin/settings-route-helper";
 import { mediaSettingsSchema } from "@/lib/validations/store-settings";
 import { getMediaSettings, setMediaSettings } from "@/lib/settings/media";

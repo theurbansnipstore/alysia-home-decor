@@ -1,16 +1,8 @@
-import { SignJWT, jwtVerify } from "jose";
 import bcrypt from "bcryptjs";
-import type { JwtPayload } from "@/types/auth";
+
+export { signToken, verifyToken } from "./token";
 
 const SALT_ROUNDS = 10;
-
-function getSecretKey(): Uint8Array {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) {
-    throw new Error("JWT_SECRET is not set. Add it to your .env file.");
-  }
-  return new TextEncoder().encode(secret);
-}
 
 export function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, SALT_ROUNDS);
@@ -18,29 +10,4 @@ export function hashPassword(password: string): Promise<string> {
 
 export function verifyPassword(password: string, hash: string): Promise<boolean> {
   return bcrypt.compare(password, hash);
-}
-
-export async function signToken(payload: JwtPayload, expiresIn: string): Promise<string> {
-  return new SignJWT({ ...payload })
-    .setProtectedHeader({ alg: "HS256" })
-    .setIssuedAt()
-    .setExpirationTime(expiresIn)
-    .sign(getSecretKey());
-}
-
-export async function verifyToken(token: string): Promise<JwtPayload | null> {
-  try {
-    const { payload } = await jwtVerify(token, getSecretKey());
-    if (
-      typeof payload.userId === "string" &&
-      typeof payload.email === "string" &&
-      typeof payload.name === "string" &&
-      typeof payload.role === "string"
-    ) {
-      return payload as unknown as JwtPayload;
-    }
-    return null;
-  } catch {
-    return null;
-  }
 }

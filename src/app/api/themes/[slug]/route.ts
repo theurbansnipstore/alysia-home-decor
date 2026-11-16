@@ -1,3 +1,6 @@
+// Query live data and request context only when this endpoint is called.
+export const dynamic = "force-dynamic";
+
 import { NextRequest } from "next/server";
 import { getThemeBySlug } from "@/lib/data/themes";
 import { getProductCatalog, parseCatalogSearchParams } from "@/lib/data/catalog";
